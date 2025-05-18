@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  auth:
+    container_name: handsdown-auth-service
+    build: ${AUTH_PATH}
+    ports:
+      - "${AUTH_PORT}:8080"
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-network
+
+  user:
+    container_name: handsdown-user-service
+    build: ${USER_PATH}
+    ports:
+      - "${USER_PORT}:8080"
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-network
+
+  items:
+    container_name: handsdown-user-service
+    build: ${ITEM_PATH}
+    ports:
+      - "${ITEM_PORT}:8080"
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-network
+
+  seller:
+    container_name: handsdown-user-service
+    build: ${SELLER_PATH}
+    ports:
+      - "${SELLER_PORT}:8080"
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-network
+
+# Databases ======
+
+  storage:
+    image: minio/minio 
+    container_name: minio-s3
+    ports:
+      - "${MINIO_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  #TODO: add postgeSQL for each service 
+
+# Utilities ======
+      
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-broker
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq/
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWD}
+    networks:
+      - app-network
+
+# Networks ======
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  rabbitmq_data:
+    driver: local
