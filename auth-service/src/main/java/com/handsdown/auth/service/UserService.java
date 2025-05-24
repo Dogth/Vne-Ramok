@@ -1,9 +1,8 @@
-package com.piggymetrics.auth.service;
+package com.handsdown.auth.service;
 
-import com.piggymetrics.auth.domain.User;
+import com.handsdown.auth.model.User;
 
 public interface UserService {
 
-	void create(User user);
-
+  void create(User user);
 }
