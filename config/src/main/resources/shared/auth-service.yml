@@ -1,0 +1,13 @@
+spring:
+  data:
+    postgres:
+      host: auth-db
+      username: user
+      password: ${AUTH_PASSWORD}
+      database: handsdown-auth
+      port: 27017
+
+server:
+  servlet:
+    context-path: /uaa
+  port: 5000
