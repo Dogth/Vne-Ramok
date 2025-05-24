@@ -1,92 +1,135 @@
 version: '3.8'
 
 services:
-  auth:
-    container_name: handsdown-auth-service
-    build: ${AUTH_PATH}
-    ports:
-      - "${AUTH_PORT}:8080"
-    depends_on:
-      - rabbitmq
-    networks:
-      - app-network
-
-  user:
-    container_name: handsdown-user-service
-    build: ${USER_PATH}
-    ports:
-      - "${USER_PORT}:8080"
-    depends_on:
-      - rabbitmq
-    networks:
-      - app-network
-
-  items:
-    container_name: handsdown-user-service
-    build: ${ITEM_PATH}
-    ports:
-      - "${ITEM_PORT}:8080"
-    depends_on:
-      - rabbitmq
-    networks:
-      - app-network
-
-  seller:
-    container_name: handsdown-user-service
-    build: ${SELLER_PATH}
-    ports:
-      - "${SELLER_PORT}:8080"
-    depends_on:
-      - rabbitmq
-    networks:
-      - app-network
-
-# Databases ======
-
-  storage:
-    image: minio/minio 
-    container_name: minio-s3
-    ports:
-      - "${MINIO_PORT}:9000"
-      - "${MINIO_CONSOLE_PORT}:9001"
+  postgres:
+    image: postgres:15 # Use a recent version
+    container_name: postgres_db
     environment:
-      MINIO_ROOT_USER: ${MINIO_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASSWD}
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio_data:/data
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  #TODO: add postgeSQL for each service 
-
-# Utilities ======
-      
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    container_name: rabbitmq-broker
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: ecommerce_db
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-network
+
+  redis:
+    image: redis:7 # Use a recent version
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ecommerce-network
+
+  rabbitmq:
+    image: rabbitmq:3-management # Includes the management UI
+    container_name: rabbitmq_broker
+    ports:
+      - "5672:5672"  # AMQP port
+      - "15672:15672" # Management UI port (access at http://localhost:15672, guest/guest)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq/
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWD}
     networks:
-      - app-network
+      - ecommerce-network
 
-# Networks ======
+  product-service:
+    build: ./product-service
+    container_name: product_service
+    ports:
+      - "8081:8081" # Host port:Container port
+    environment:
+      SPRING_APPLICATION_NAME: product-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ecommerce_db
+      SPRING_DATASOURCE_USERNAME: myuser
+      SPRING_DATASOURCE_PASSWORD: mypassword
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update # Or create-drop for dev
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      # RabbitMQ not directly used by product-service in this simple design,
+      # but could be added for events like "product_updated"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - ecommerce-network
 
-networks:
-  app-network:
-    driver: bridge
+  order-service:
+    build: ./order-service
+    container_name: order_service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_APPLICATION_NAME: order-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ecommerce_db
+      SPRING_DATASOURCE_USERNAME: myuser
+      SPRING_DATASOURCE_PASSWORD: mypassword
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_REDIS_HOST: redis # For potential caching
+      SPRING_REDIS_PORT: 6379
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+      # Other service URLs (for inter-service communication if using REST, or rely on events)
+      PRODUCT_SERVICE_URL: http://product-service:8081/api/products
+      INVENTORY_SERVICE_URL: http://inventory-service:8083/api/inventory
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+      - product-service # Ensure product service is available for lookups
+      - inventory-service # Ensure inventory service is available for stock checks
+    networks:
+      - ecommerce-network
+
+  inventory-service:
+    build: ./inventory-service
+    container_name: inventory_service
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_APPLICATION_NAME: inventory-service
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ecommerce_db # Could have its own DB too
+      SPRING_DATASOURCE_USERNAME: myuser
+      SPRING_DATASOURCE_PASSWORD: mypassword
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+    depends_on:
+      - postgres
+      - rabbitmq
+    networks:
+      - ecommerce-network
+
+  notification-service: # Conceptual, mainly for listening to RabbitMQ
+    build: ./notification-service
+    container_name: notification_service
+    # No port exposed if it's just a backend worker
+    environment:
+      SPRING_APPLICATION_NAME: notification-service
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: guest
+      SPRING_RABBITMQ_PASSWORD: guest
+    depends_on:
+      - rabbitmq
+    networks:
+      - ecommerce-network
 
 volumes:
+  postgres_data:
+  redis_data:
   rabbitmq_data:
-    driver: local
+
+networks:
+  ecommerce-network:
+    driver: bridge

@@ -1,0 +1,18 @@
+FROM maven:3.8.1-openjdk-17 AS build
+MAINTAINER Dogth <dogth@kitteth.com>
+
+WORKDIR .
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+COPY src ./src
+RUN mvn clean package -DskipTests
+
+FROM gcr.io/distroless/java:17
+COPY --from=build /auth-service/target/*.jar app.jar
+
+RUN addgroup --system appgroup && adduser --system appuser --ingroup appgroup
+USER appuser
+
+EXPOSE 8080
+
+CMD ["java", "-jar", "/app/app.jar"]

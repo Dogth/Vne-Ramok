@@ -1,0 +1,5 @@
+spring:
+  data:
+    postgres:
+      database: handsdown
+      port: 0
